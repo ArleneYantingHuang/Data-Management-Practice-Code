@@ -1,0 +1,157 @@
+use library_3
+
+db.library.insert([
+{
+title: "Case Interview Secret", 
+primary_author:"Victor Cheng", 
+date_of_first_publication: 2002,
+number_of_pages:271, 
+publisher: "Innovation Press",
+topic:"Law"
+},
+{
+title: "Poems", 
+primary_author:"Mathew Bishop", 
+date_of_first_publication: 2018,
+number_of_pages:352, 
+publisher: "Farrar, Straus and Giroux",
+topic:"fiction"
+},
+{
+title: "L Etranger", 
+primary_author:"Albert Camus", 
+date_of_first_publication: 1942,
+number_of_pages:154, 
+publisher: "Tianjin Chuban",
+topic:"fiction"
+}]);
+
+
+db.user.insert([
+{
+name: "Emma Wang",
+phone: "9374856283",
+address: "140 Peins Rd Apt 187, NY 12107",
+university_affiliation: "UW-Madison"
+},
+{
+name: "Luo John",
+phone: "5836184958",
+address: "139 Columbus Cir Apt 3713, NY 12119",
+university_affiliation: "UW-Madison"
+},
+{
+name: "Lily Ma",
+phone: "4736458324",
+address: "506 E 17rd, NY 12112",
+university_affiliation: "UW-Madison"
+},
+{
+name: "Trump D",
+phone: "3947273942",
+address: "8 Liberty Pl, NY 12110",
+university_affiliation: "UCLA"
+},
+{
+name: "Mia",
+phone: "3847284449",
+address: "134 W 43rd, NY 12123",
+university_affiliation: "Fordham University"
+}]);
+
+db.checkout.insert([
+{
+checkout_id:1,
+checkout_date:"2019-01-01",
+book: {title: "Case Interview Secret", topic:"Law"},
+user: {name: "Luo John",university_affiliation: "UW-Madison"},
+},
+{
+checkout_id:2,
+checkout_date:"2019-01-21",
+book: {title: "Case Interview Secret", topic:"Law"},
+user:{name: "Trump D", university_affiliation: "UCLA"},
+},
+{
+checkout_id:3,
+checkout_date:"2019-02-14",
+book:{title: "Poems", topic:"fiction"},
+user:{name: "Emma Wang", university_affiliation: "UW-Madison"},
+},
+{
+checkout_id:4,
+checkout_date:"2019-03-31",
+book:{title: "L Etranger", topic:"fiction"},
+user:{name: "Mia", university_affiliation: "Fordham University"},
+},
+{
+checkout_id:5,
+checkout_date:"2019-04-08",
+book:{title: "L Etranger", topic:"fiction"},
+user:{name:"Lily Ma", university_affiliation: "UW-Madison"},
+}]);
+
+db.comment.insert([
+{
+comment_id:1,
+comment_date:"2019-01-05",
+book: {title: "Case Interview Secret", topic:"Law"},
+user: {name: "Luo John",university_affiliation: "UW-Madison"},
+Comment:["The book is useful for consulting candidates.", "Frameworks are great.", "Don't forget to download the free bonus!"]
+},
+{
+comment_id:2,
+comment_date:"2019-01-31",
+book: {title: "Case Interview Secret", topic:"Law"},
+user:{name: "Trump D", university_affiliation: "UCLA"},
+Comment:["Extremely useful for case interview.", "A lot of detailed explanations.", "Chapter 4 is the best."]
+},
+{
+comment_id:3,
+comment_date:"2019-02-24",
+book:{title: "Poems", topic:"fiction"},
+user:{name: "Emma Wang", university_affiliation: "UW-Madison"},
+Comment:["Required textbook for ENGL203." , "The poems are modern and easy to understand.", "Great for beginners."]
+},
+{
+comment_id:4,
+comment_date:"2019-03-31",
+book:{title: "L Etranger", topic:"fiction"},
+user:{name: "Mia", university_affiliation: "Fordham University"},
+Comment:["Reflects the problems of comtemporary legistimation system in France.", 
+	"The first book that inspires me to learn English literature.",
+	 "I will recommend it to my friends."]
+},
+{
+comment_id:5,
+comment_date:"2019-04-20",
+book:{title: "L Etranger", topic:"fiction"},
+user:{name:"Lily Ma", university_affiliation: "UW-Madison"},
+Comment:["Required textbook for ENGL205.", "Nice story.", "Won Nobel Prize."]
+}]);
+
+
+Q1
+db.checkout.find({checkout_date: {$gte:"2019-01-08"}});
+
+Q2
+db.checkout.find({"book.title": "L Etranger"})
+
+Q3
+db.library.find({topic:"fiction"})
+
+Q4
+db.checkouts.distinct("user",
+                       {$and:[{checked_out: {$gte: "2019-01-08"}},
+                              {checked_out: {$lte: "2019-04-15"}},
+                              {"book.topics": "MACHINE LEARNING"},
+                              {"user.university_affiliation": "UW-Madison"}]
+                       });
+
+Q5
+db.comment.find({$and:[{comment_date: {$gte: "2019-01-08"}}, 
+{comment_date: {$lte: "2019-04-15"}}]);
+Sort(comment_date, -1);
+
+Q6
+db.comment.find({"user.name": "Mia"}, {"book.title" : "L Etranger"})
