@@ -1,0 +1,91 @@
+docker exec -it mongodb bash
+mongo
+use library
+show dbs
+
+db.createCollection('books')
+show collections
+db.books.insert({book_id : '9780520958524', title : 'Markets and States in Tropical Africa', primary_author : 'Robert H. Bates', date_of_first_publication : '2014-04-12', number_of_pages : 204, publisher : 'University of California Press', topics :  ['Agriculture','Economics']});
+db.books.find()
+db.books.insert([
+	{book_id : '9780511139093', title : 'Economic Origins of Dictatorship and Democracy', primary_author : 'Daron Acemoglu', secondary_authors : ['James A. Robinson'], date_of_first_publication : '2005-10-01', number_of_pages : 434, publisher : 'Cambridge University Press', topics : ['Politics','Economics','Machine Learning']}, 
+	{book_id : '9781118386576', title : 'Enders Game and Philosophy', primary_author : 'Kevin S. Decker', secondary_authors : ['William Irwin','William Irwin'], date_of_first_publication : '2013-07-22', number_of_pages : 244, publisher : 'John Wiley & Sons, Incorporated', translator : 'Arlene Huang', topics : ['Fiction']}])
+db.books.find()
+
+
+db.createCollection('users')
+show collections
+db.users.insert([
+	{user_id: '1', name: 'Arlene Huang', phone: '6469285928', address: '788 West 72 Street', university_affiliation: 'Columbia University'},
+	{user_id: '2', name: 'Hello Kitty', phone: '6378493928', address: '230 Pink Street', university_affiliation: 'New York University'},
+	{user_id: '3', name: 'Donald Trump', phone: '3747183949', address: '1 Orange Face Street', university_affiliation: 'Hair Saloon College'},
+	{user_id: '4', name: 'Harry Potter', phone: '8476354945', address: '628 Diagon Alley', university_affiliation: 'Hogwarts'},
+	{user_id: '5', name: 'Justin Bieber', phone: '8374638475', address: '100 Hellsound Road', university_affiliation: 'University of California - Breakley'}])
+db.users.find()
+
+
+db.createCollection('checkouts')
+show collections
+db.checkouts.insert([
+	{book_id : '9780520958524',
+book_title : 'Markets and States in Tropical Africa', 
+topics : ['Agriculture','Economics'], 
+user_id : '1', 
+user_name : 'Arlene Huang', 
+checkout_date : '2019-09-01', 
+user_university_affiliation : 'Columbia University'},
+	{book_id : '9780511139093', 
+book_title : 'Economic Origins of Dictatorship and Democracy', 
+topics : ['Politics','Economics','Machine Learning'], 
+user_id : '1', 
+user_name : 'Arlene Huang', 
+checkout_date : '2020-02-02', 
+user_university_affiliation : 'Columbia University'},
+	{book_id : '9781118386576', 
+book_title : 'Enders Game and Philosophy', 
+topics : ['Fiction'], 
+user_id : '2', 
+user_name : 'Hello Kitty', 
+checkout_date : '2020-02-03', 
+user_university_affiliation : 'New York University'},
+	{book_id : '9780520958524', 
+book_title : 'Markets and States in Tropical Africa', 
+topics : ['Agriculture','Economics'], 
+user_id : '4', 
+user_name : 'Harry Potter', 
+checkout_date : '2019-12-10', 
+user_university_affiliation : 'Hogwarts'},
+	{book_id : '9781118386576', 
+book_title : 'Enders Game and Philosophy', 
+topics : ['Fiction'], 
+user_id : '5', 
+user_name : 'Justin Bieber', 
+checkout_date : '2019-12-31', 
+user_university_affiliation : 'University of California - Breakley'}])
+db.checkouts.find()
+
+
+
+
+
+
+
+QUERIES
+
+# Which books have been checked out since such and such date.
+# i.e. 2019-12-01
+db.checkouts.find({checkout_date:{$gt:'2019-12-01'}})
+
+# Which users have checked out such and such book.
+# i.e. book '9781118386576'
+db.checkouts.find({book_id:'9781118386576'})
+
+# How many books does the library have on such and such topic.
+# i.e. fiction books
+db.books.find({topics:'Fiction'})
+
+# Which users from Columbia University have checked out books on Machine Learning between this date and that date.
+# i.e. between 2019-10-20 and 2020-03-20
+db.checkouts.find({$and:[{user_university_affiliation:'Columbia University'},{topics:'Machine Learning'},{checkout_date:{$gt:'2019-10-20'}},{checkout_date:{$lt:'2020-03-20'}}]})
+
+

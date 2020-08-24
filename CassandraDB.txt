@@ -1,0 +1,61 @@
+CREATE KEYSPACE Vlibrary with replication =  {'class': 'SimpleStrategy', 'replication_factor' : 3};
+use Vlibrary;
+CREATE TABLE books (book_id text PRIMARY KEY, title text, primary_author text, secondary_authors list<text>, date_of_first_publication date, number_of_pages int, publisher text, translator text, topics list<text>);
+CREATE TABLE users (user_id text PRIMARY KEY, name text, phone text, address text, university_affiliation text);
+CREATE TABLE checkouts (book_id text, book_title text, topics list<text>, user_id text, user_name text, checkout_date date, user_university_affiliation text, PRIMARY KEY(book_id, user_id, checkout_date));
+
+INSERT INTO books (book_id, title, primary_author, date_of_first_publication, number_of_pages, publisher, topics)
+VALUES ('9780520958524', 'Markets and States in Tropical Africa', 'Robert H. Bates', '2014-04-12', 204, 'University of California Press', ['Agriculture','Economics']);
+INSERT INTO books (book_id, title, primary_author, secondary_authors, date_of_first_publication, number_of_pages, publisher, topics)
+VALUES ('9780511139093', 'Economic Origins of Dictatorship and Democracy', 'Daron Acemoglu', ['James A. Robinson'], '2005-10-01', 434, 'Cambridge University Press', ['Politics','Economics','Machine Learning']);
+INSERT INTO books (book_id, title, primary_author, secondary_authors, date_of_first_publication, number_of_pages, publisher, translator, topics)
+VALUES ('9781118386576', 'Enders Game and Philosophy', 'Kevin S. Decker', ['William Irwin','William Irwin'], '2013-07-22', 244, 'John Wiley & Sons, Incorporated', 'Arlene Huang', ['Fiction']);
+
+INSERT INTO users (user_id, name, phone, address, university_affiliation)
+VALUES ('1', 'Arlene Huang', '6469285928', '788 West 72 Street', 'Columbia University');
+INSERT INTO users (user_id, name, phone, address, university_affiliation)
+VALUES ('2', 'Hello Kitty', '6378493928', '230 Pink Street', 'New York University');
+INSERT INTO users (user_id, name, phone, address, university_affiliation)
+VALUES ('3', 'Donald Trump', '3747183949', '1 Orange Face Street', 'Hair Saloon College');
+INSERT INTO users (user_id, name, phone, address, university_affiliation)
+VALUES ('4', 'Harry Potter', '8476354945', '628 Diagon Alley', 'Hogwarts');
+INSERT INTO users (user_id, name, phone, address, university_affiliation)
+VALUES ('5', 'Justin Bieber', '8374638475', '100 Hellsound Road', 'University of California - Breakley');
+
+INSERT INTO checkouts (book_id, book_title, topics, user_id, user_name, checkout_date, user_university_affiliation)
+VALUES ('9780520958524','Markets and States in Tropical Africa',['Agriculture','Economics'],'1','Arlene Huang','2019-09-01','Columbia University');
+INSERT INTO checkouts (book_id, book_title, topics, user_id, user_name, checkout_date, user_university_affiliation)
+VALUES ('9780511139093','Economic Origins of Dictatorship and Democracy',['Politics','Economics','Machine Learning'],'1','Arlene Huang','2020-02-02','Columbia University');
+INSERT INTO checkouts (book_id, book_title, topics, user_id, user_name, checkout_date, user_university_affiliation)
+VALUES ('9781118386576','Enders Game and Philosophy',['Fiction'],'2','Hello Kitty', '2020-02-03','New York University');
+INSERT INTO checkouts (book_id, book_title, topics, user_id, user_name, checkout_date, user_university_affiliation)
+VALUES ('9780520958524','Markets and States in Tropical Africa',['Agriculture','Economics'],'4','Harry Potter', '2019-12-10','Hogwarts');
+INSERT INTO checkouts (book_id, book_title, topics, user_id, user_name, checkout_date, user_university_affiliation)
+VALUES ('9781118386576','Enders Game and Philosophy',['Fiction'],'5','Justin Bieber','2019-12-31','University of California - Breakley');
+
+
+-- Which books have been checked out since such and such date.
+-- i.e. 2019-12-01
+SELECT book_id, book_title, checkout_date FROM checkouts
+WHERE checkout_date >= '2019-12-01' ALLOW FILTERING;
+
+-- Which users have checked out such and such book.
+-- i.e. book '9781118386576'
+SELECT user_id, user_name, book_title FROM checkouts
+WHERE book_id = '9781118386576' ALLOW FILTERING;
+
+-- How many books does the library have on such and such topic.
+-- i.e. fiction books
+SELECT COUNT(*) FROM books 
+WHERE topics contains 'Fiction' ALLOW FILTERING;
+
+-- Which users from Columbia University have checked out books on Machine Learning between this date and that date.
+-- i.e. between 2019-10-20 and 2020-03-20
+SELECT user_id, user_name, book_title, checkout_date FROM checkouts
+WHERE user_university_affiliation = 'Columbia University'
+AND topics contains 'Machine Learning'
+AND checkout_date >= '2019-10-20' AND checkout_date <= '2020-03-20' ALLOW FILTERING;
+
+
+
+
