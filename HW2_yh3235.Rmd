@@ -1,0 +1,469 @@
+---
+title: "APANPS5205 Homework 2"
+output: pdf_document
+---
+
+For this assignment, the following libraries are required, please install and load them by running the following:
+
+```{r, message=FALSE, warning=FALSE}
+
+required_packages = c("rpart", "rpart.plot", "psych", "randomForest")
+packages_to_install = setdiff(required_packages, installed.packages()[,"Package"])
+
+if (length(packages_to_install)!=0) {
+  install.packages(packages_to_install)
+}
+
+library(rpart)
+library(rpart.plot)
+library(psych)
+library(randomForest)
+
+set.seed(0)
+
+```
+
+
+## Question 1. Maximum Likelihood
+
+### 1.1 Explain the maximum likelihood estimation process. Intuitively, what is the goal of the likelihood function? Why do we take derivative of the log likelihood? (3 pts) 
+The maximum likelihood estimation process starts with determining the likelihood function; then the derivatives of log-likelihood need to be calculated; finally, setting the derivative to zero, we can solve the equation and get the max likelihood estimation.
+In statistics, maximum likelihood estimation (MLE) is a method of estimating the parameters of a probability distribution by maximizing a likelihood function, so that under the assumed statistical model the observed data is most probable. The point in the parameter space that maximizes the likelihood function is called the maximum likelihood estimate. The goal of using the likelihood function is to figure out the maximum likelihood point and take it as the estimation of the target parameter. 
+The natural logarithm is a monotonically increasing function. This means that if the value on the x-axis increases, the value on the y-axis also increases. Thus, we can use the log-function to enlarge the difference while the trend can remain the same. This is the major reason why we take the derivative of the log-likelihood.
+
+
+### 1.2 Estimate coin toss bias (4 pts)
+
+
+```{r}
+
+rm(list = ls())
+
+# read in coin toss data and store data in a vector
+coin_toss = read.csv("/Users/arlenehuang/OneDrive - Columbia University/Summer 2020/APAN 5335/HW2/coin_toss.csv")
+coin_toss = unlist(coin_toss)
+
+# write negative log-likelihood function for bernoulli trial
+func = function(x,p){
+  -(sum(x*log(p)+(1-x)*log(1-p)))
+}
+
+# use "optimize" to find the optimal parameter
+optimization = optimize(func, c(0,1), x= coin_toss)
+
+# report the optimal parameter
+optimization$minimum
+
+```
+
+
+```{r}
+# using only the first 50 coin tosses, repeat the process
+coin_toss_50 = coin_toss[1:50]
+optimization_50 = optimize(func, c(0,1), x= coin_toss_50)
+optimization_50$minimum
+
+# using only the first 100 coin tosses, repeat the process
+coin_toss_100 = coin_toss[1:100]
+optimization_100 = optimize(func, c(0,1), x= coin_toss_100)
+optimization_100$minimum
+
+```
+
+
+### 1.3 We can also derive the maximum likelihood estimator for a series of coin flip. Using this estimator, what is the maximum likelihood estimate? (2 pts)
+
+```{r}
+# mle estimate of all the data
+mle = func(coin_toss, optimization$minimum)
+print(paste0("MLE on all data = ", mle))
+print(paste0("The maximum likelihood estimate = ", mean(coin_toss)))
+
+# mle estimate of random 50 points
+# set.seed(1213)
+sample_50 = sample(coin_toss, 50, replace = F)
+mle_50 = func(sample_50, optimization$minimum)
+print(paste0("MLE on 50 data points = ", mle_50))
+print(paste0("The maximum likelihood estimate = ", mean(sample_50)))
+
+# mle estimate of random 100 points
+# set.seed(1213)
+sample_100 = sample(coin_toss, 100, replace = F)
+mle_100 = func(sample_100, optimization$minimum)
+print(paste0("MLE on 100 data points = ", mle_100))
+print(paste0("The maximum likelihood estimate = ", mean(sample_100)))
+
+```
+
+### 1.4 Comment on how the estimates at 50 or 100 differ from the estimates using all of the data. (1 pt)
+The more data points involved, the estimation will be nearer to the estimation using all of the data.
+
+
+## Question 2. Decision Tree
+
+For this question, we will need to download the Cleveland Clinic heart disease data set from UCI Machine Learning Repository. We'll use decision tree to predict the probability of heart disease. 
+
+### 2.1 Data Preparation & Exploration (3 pts)
+
+```{r}
+rm(list = ls())
+
+# read in the data from UCI Machine Learning Repository
+
+heart_disease_url = 'http://archive.ics.uci.edu/ml/machine-learning-databases/heart-disease/processed.cleveland.data'
+
+heart = read.csv(
+  url(heart_disease_url),
+  header = F, 
+  col.names = c("age", "sex", "cp", "trestbps", "chol",
+                "fbs", "restecg", "thalach", "exang", "oldpeak", "slope",
+                "ca", "thal", "num"))
+rm(heart_disease_url)
+
+# let's look at the summary of the data
+summary(heart)
+
+# Notice that the variables "ca" and "thal" have "?" in the data. 
+# Let's remove those from our dataset.
+### not very sure if the question want to remove the entire row or colume or just the data point
+# to remove the entire row
+store = heart
+heart = heart[!(heart$ca == "?"),]
+heart = heart[!(heart$thal == "?"),]
+# to remove the data points
+heart = store
+heart[heart$ca == "?","ca"] = NA
+heart[heart$thal == "?","thal"] = NA
+# to remove the column
+heart = store
+heart$ca = NULL
+heart$thal = NULL
+# For conveniency, I will use the data what remove the entire row for the following.
+heart = store
+heart = heart[!(heart$ca == "?"),]
+heart = heart[!(heart$thal == "?"),]
+rm(store)
+
+# use multi.hist() to plot histograms of all of the variables. 
+# Notice that the data is required to have numeric values. 
+# To convert your data to numeric, you can use sapply() and is.numeric().
+sapply(heart, is.numeric)
+heart$ca = as.numeric(heart$ca)
+heart$thal = as.numeric(heart$thal)
+library(psych)
+multi.hist(heart)
+
+```
+
+Let's create our target feature. Our target feature should be an indicator that tells us if an individual has a heart disease (1) or not (0). To do this, we will need to transform the feature "num" to 1 if it's greater than zero and 0 if it's zero. Remove the "num" feature after the transformation. Let's label our target feature "disease".
+
+```{r}
+# create target variable
+disease = heart$num
+for (i in 1:length(disease)){
+  if(disease[i] > 0){
+    disease[i] = 1
+  }
+}
+rm(i)
+heart = cbind(disease, heart)
+
+# remove "num"
+heart = heart[,-15]
+rm(disease)
+
+```
+
+### 2.2 Data Splitting (2 pts)
+
+Let's split our data into three sets: training (40%), validation (20%), and testing (40%). In other words, we're using 60% of our data to train and tune our model.
+
+```{r}
+# split data into training, validation, and testing sets
+split = c(train = 0.4, test = 0.4, validation = 0.2)
+
+split_name = sample(cut(seq(nrow(heart)), nrow(heart) * cumsum(c(0,split)), labels = names(split)))
+
+cut = split(heart, split_name)
+
+train = cut$train
+test = cut$test
+validation = cut$validation
+
+rm(split, split_name, cut)
+```
+
+### 2.3 Decision Tree Model Fitting & Parameter Tuning (5 pts)
+
+We want to train a decision tree model that generalizes well. Let's vary two parameters in our decision tree model, maxdepth and minsplit, and see how they perform on the validation set. Let's vary maxdepth from 1 to 5 and minsplit from 10 to 30.
+
+```{r}
+
+# loop through the parameter set and store the parameters, models, 
+# and accuracies on the validation set
+library(rpart)
+library(rpart.plot)
+accuracy_table = data.frame()
+for (i in 1:5){
+  for (j in 10:30){
+    tree = rpart(disease~., data = train, method = "class", maxdepth = i, minsplit = j)
+    pred = predict(tree, validation, type = "class")
+    ct = table(disease = validation$disease, predictions = pred)
+    accuracy = sum(ct[1,1],ct[2,2])/nrow(validation)
+    accuracy_table[i,(j-9)] = accuracy
+  }
+}
+colnames(accuracy_table) = paste0("minsplit=",10:30)
+rownames(accuracy_table) = paste0("maxdepth=",1:5)
+
+# report the best parameters (there can be more than one set, select one of them)
+print("The best parameter pair is:")
+flag = 0
+for (i in 1:5){
+  for (j in 1:21){
+    if (accuracy_table[i,j] == max(accuracy_table)){
+      print(paste0(rownames(accuracy_table)[i], ", ", colnames(accuracy_table)[j]))
+      flag = 1
+      bestmaxdepth = i
+      bestminsplit = j + 9
+      break
+    }
+  }
+  if (flag == 1){
+    break
+  }
+}
+
+# report the best score from the validation set
+print(paste0("The best score from validation set=", max(accuracy_table)))
+```
+
+Using the parameters above, let's compare how our model performs with different split metrics, information and ginni.
+
+```{r}
+# train using information metric
+para_info = rpart.control(minsplit = bestminsplit, maxdepth = bestmaxdepth)
+tree_info = rpart(disease ~., data = train, method = 'class', control = para_info, parms = list(split = "information"))
+
+# report accuracy on validation set 
+pred_info = predict(tree_info, validation, type = "class")
+ct_info = table(disease = validation$disease, predictions = pred_info)
+accuracy_info = sum(ct_info[1,1],ct_info[2,2])/nrow(validation)
+print(paste0("accuracy using information metric = ", accuracy_info))
+
+# train using ginni metric
+para_gini = rpart.control(minsplit = bestminsplit, maxdepth = bestmaxdepth)
+tree_gini = rpart(disease ~., data = train, method = 'class', control = para_gini, parms = list(split = "gini"))
+
+# report accuracy on validation set 
+pred_gini = predict(tree_gini, validation, type = "class")
+ct_gini = table(disease = validation$disease, predictions = pred_gini)
+accuracy_gini = sum(ct_gini[1,1],ct_gini[2,2])/nrow(validation)
+print(paste0("accuracy using gini metric = ", accuracy_gini))
+
+```
+
+```{r}
+
+# visualize our best model using rpart.plot()
+library(rpart.plot)
+if (accuracy_info > accuracy_gini){
+  rpart.plot(tree_info)
+} else{
+  rpart.plot(tree_gini)
+}
+
+# visualize the confusion matrix of our actual vs. predicted for our test data
+if (accuracy_info > accuracy_gini){
+  ct_info
+} else{
+  ct_gini
+}
+
+# compute test accuracy
+if (accuracy_info > accuracy_gini){
+  para_info = rpart.control(minsplit = bestminsplit, maxdepth = bestmaxdepth)
+  tree_info = rpart(disease ~., data = test, method = 'class', control = para_info, parms = list(split = "information"))
+  pred = predict(tree_info, test, type = "class")
+  ct_info = table(disease = test$disease, predictions = pred)
+  accuracy_info = sum(ct_info[1,1],ct_info[2,2])/nrow(validation)
+  print(paste0("test accuracy using information metric = ", accuracy_info))
+} else{
+  para_gini = rpart.control(minsplit = bestminsplit, maxdepth = bestmaxdepth)
+  tree_gini = rpart(disease ~., data = test, method = 'class', control = para_gini, parms = list(split = "gini"))
+  pred = predict(tree_gini, test, type = "class")
+  ct_gini = table(disease = test$disease, predictions = pred)
+  accuracy_gini = sum(ct_gini[1,1],ct_gini[2,2])/nrow(test)
+  print(paste0("test accuracy using gini metric = ", accuracy_gini))
+}
+
+```
+
+
+
+## Question 3. Random Forest
+
+### 3.1 Read in the iris data set.Subset your data to only include "Sepal Length", "Sepal Width", "Petal Length", and "Petal Width". Estimate the species label for iris flowers using random forest. To do so, first prepare your dataset by spliting to training and testing set( 70% for training the model) (2 pts)
+
+```{r}
+
+rm(list = ls())
+
+# read in "iris" using data()
+data("iris")
+
+# split your data in to a features ("Sepal Length", "Sepal Width", "Petal Length",
+# and "Petal Width") and target ("Species")
+features = iris[,1:4]
+target = iris[,5]
+
+# preparing data for training the model
+split = sample(1:nrow(iris), 0.7*nrow(iris))
+train = iris[split,]
+test = iris[-split,]
+
+```
+
+### 3.2 Generate the Random Forest Learning Tree (2 pts)
+
+```{r}
+# generating the random forest learning model. Start with 50 tress
+library(randomForest)
+forest = randomForest(Species~., data = train, ntree = 50)
+
+```
+
+### 3.3 Evaluate the model on the test data and check the accuracy (3 pts)
+
+```{r}
+# evalute the model on the test data
+pred = predict(forest, newdata = test)
+ct = table(pred,test$Species); ct
+  
+# check the accuracy
+accuracy = sum(ct[1,1],ct[2,2],ct[3,3])/nrow(test)
+print(paste0("accuracy = ", accuracy))
+
+```
+
+### 3.4 Number of trees can be tuned to improve the predictive power of the model.Higher number of trees give you better performance but makes your code slower. Change the number of trees and repeat 3.2 and 3.3. Report any changes. (3 pts)
+
+```{r}
+# generating the random forest learning model. Start with 500 tress
+forest = randomForest(Species~., data = train, ntree = 500)
+
+# check the accuracy
+pred = predict(forest, newdata = test)
+ct = table(pred,test$Species); ct
+accuracy = sum(ct[1,1],ct[2,2],ct[3,3])/nrow(test)
+print(paste0("accuracy = ", accuracy))
+
+# the accuracy remains the same, no change, it seems that ntree = 50 is good enough
+
+```
+
+
+## Question 4 : Numerically find the minumum solution of the function below. Do a few iterations to improve your initial guess. 
+
+$$F \left( x \right)= \frac{1}{2} \left (4x_1^2 +4x_1x_2+2x_1x_3+5x_2^2+6x_2x_3+7x_3^2+x_1x_4+x_2x_5\right)+2x_1-8x_2+9x_3$$
+
+### initial guess = 2 for $x_1-x_5$ and the learning rate =0.01 and epsilon=0.4. (4 pts)
+
+```{r}
+
+# original formula 
+fun = function(x_1,x_2,x_3,x_4,x_5) {
+  result = 1/2*(4*x_1^2+4*x_1*x_2+2*x_1*x_3+5*x_2^2+6*x_2*x_3+7*x_3^2+x_1*x_4+x_2*x_5)+2*x_1-8*x_2+9*x_3
+  return(result)
+}
+
+# define the initial value 
+x = c(2,2,2,2,2)
+
+# define the alpha value (learning rate)
+alpha = 0.01
+
+# define the epsilon value, maximum iteration allowed 
+epsilon = 0.4
+
+calculate = function(x, alpha = 0.01, epsilon = 0.4, repeat_time = 10000, change = 10000){
+  n = 0
+  x_1 = x[1]
+  x_2 = x[2]
+  x_3 = x[3]
+  x_4 = x[4]
+  x_5 = x[5]
+  y = fun(x_1,x_2,x_3,x_4,x_5)
+  result_df = data.frame()
+  while (abs(change) > epsilon & n < repeat_time){
+    n = n + 1
+    result_df[n,"n"] = n
+    result_df[n,"x_1"] = x_1
+    result_df[n,"x_2"] = x_2
+    result_df[n,"x_3"] = x_3
+    result_df[n,"x_4"] = x_4
+    result_df[n,"x_5"] = x_5
+    result_df[n,"y"] = y
+    result_df[n,"change"] = change
+    g1<-4*x_1+2*x_2+x_3+0.5*x_4+2
+    g2<-2*x_1+5*x_2+3*x_3+0.5*x_5-8
+    g3<-x_1+3*x_2+7*x_3+9
+    g4 <-0.5*x_1
+    g5 <-0.5*x_2
+    x_1=x_1-alpha*g1
+    x_2=x_2-alpha*g2
+    x_3=x_3-alpha*g3
+    x_4=x_4-alpha*g4
+    x_5=x_5-alpha*g5
+    previous_y = y
+    y = fun(x_1,x_2,x_3,x_4,x_5)
+    change = y - previous_y
+  }
+  return(result_df)
+}
+
+# create the data points' dataframe
+df = calculate(x, alpha, epsilon); df
+
+```
+### 4.1 Plot the function value vs. number of iterations, and draw the conclusion. Did the function converged? If not, how can we improve and make it converage? (2 pts)
+
+We can increase the number of iterations or/and decrease the step length to improve the algorithm
+```{r}
+# draw the function value vs. #iterations
+library(ggplot2)
+ggplot(data = df, aes(x = n, y = y))+
+  geom_point()
+
+```
+
+### 4.2 Try a few different initial points, repeat the process, and observe the convergence. (2 pts)
+```{r}
+# try different initial points, repeat, and observe convergence
+
+
+#try random numbers
+x = runif(5,-10,10)
+df = calculate(x, alpha, epsilon); df
+ggplot(data = df, aes(x = n, y = y))+
+  geom_point()
+
+x = runif(5,-10,10)
+df = calculate(x, alpha, epsilon); df
+ggplot(data = df, aes(x = n, y = y))+
+  geom_point()
+
+x = runif(5,-10,10)
+df = calculate(x, alpha, epsilon); df
+ggplot(data = df, aes(x = n, y = y))+
+  geom_point()
+
+
+```
+
+### 4.3 Based on your obeservations above, what are the important factors to improve convergence rate? (2 pts)
+
+First of all, the initial guess is important, the closer your initial guess is, the less time it takes to get to the final result.
+The learning rate is also important, this determines how fast the model could learn when crawling to the final result.
+
+

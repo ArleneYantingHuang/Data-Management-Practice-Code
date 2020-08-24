@@ -1,0 +1,642 @@
+---
+title: "One Model or Many?"
+author: "Arlene Huang, yh3235"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment="", warning = FALSE, message = FALSE, tidy.opts=list(width.cutoff=55))
+```
+
+```{r seed}
+set.seed(35)
+```
+
+```{r libraries}
+library(caret)
+library(glmnet)
+library(class)
+library(ROCR)
+library(rpart)
+library(randomForest)
+library(xgboost)
+library(stats)
+```
+
+```{r load_data}
+data = read.csv("training_v2.csv")
+```
+
+```{r }
+data = data[!is.na(data$age),]
+data$age_group = 1
+data[(data$age < 50), 187] = "0-50"
+data[(data$age >= 50) & (data$age < 60), "age_group"] = "50-60"
+data[(data$age >= 60) & (data$age < 70), "age_group"] = "60-70"
+data[(data$age >= 70) & (data$age < 80), "age_group"] = "70-80"
+data[(data$age >= 80) & (data$age < 100), "age_group"] = "80-100"
+table(data$age_group)
+```
+
+```{r }
+remove = list()
+for (i in 1:186){
+  na_ratio = sum(is.na(data[,i]))/nrow(data)
+  if (na_ratio > 0.05){
+    remove = rbind(remove, i)
+  }
+}
+remove = unlist(remove)
+data = data[, -remove]
+
+remove = list()
+for(i in 1:87485){
+  if(sum(is.na(data[i,])) > 0){
+   remove = rbind(remove, i)
+  }
+}
+remove = unlist(remove)
+data = data[-remove,]
+rm(i, na_ratio, remove)
+```
+
+
+```{r}
+store1 = data
+```
+
+
+```{r }
+for (i in 1:72){
+  if(!(is.numeric(data[,i]))){
+    print(paste(i, names(data)[i]))
+  }
+}
+dummy_ethnicity = model.matrix(~ethnicity, data)
+dummy_gender = model.matrix(~gender, data)
+dummy_hospital_admit_source = model.matrix(~hospital_admit_source, data)
+dummy_icu_admit_source = model.matrix(~icu_admit_source, data)
+dummy_icu_type = model.matrix(~icu_type, data)
+dummy_icu_stay_type = model.matrix(~icu_stay_type, data)
+dummy_apache_3j_bodysystem = model.matrix(~apache_3j_bodysystem, data)
+dummy_apache_2_bodysystem = model.matrix(~apache_2_bodysystem, data)
+
+data = data[,-c(8,9,11,12,14,15,71,72)]
+data = cbind(data,dummy_ethnicity,dummy_gender,dummy_hospital_admit_source,dummy_icu_admit_source,dummy_icu_type,dummy_icu_stay_type,dummy_apache_3j_bodysystem,dummy_apache_2_bodysystem)
+
+data$`(Intercept)` = NULL
+data$`(Intercept)` = NULL
+data$`(Intercept)` = NULL
+data$`(Intercept)` = NULL
+data$`(Intercept)` = NULL
+data$`(Intercept)` = NULL
+data$`(Intercept)` = NULL
+data$`(Intercept)` = NULL
+data$X.Intercept. = NULL
+data$X.Intercept..1 = NULL
+
+rm(dummy_ethnicity,dummy_gender,dummy_hospital_admit_source,dummy_icu_admit_source,dummy_icu_type,dummy_icu_stay_type,dummy_apache_3j_bodysystem,dummy_apache_2_bodysystem)
+rm(i)
+```
+
+```{r}
+store2 = data
+```
+
+
+## Introduction
+
+Large datasets can include many fairly different subgroups. Each subgroup may distribute differently, making it less accurate to analyze the whole dataset with a single model. This project aims to analyze such a phenomenon. Is it true that analysis using many models for different subgroups are more accurate than analysis using one model for the entire group? Is this phenomenon constant for various algorithms? These are the questions this project tries to answer.
+
+## Adversarial Validation
+
+Before diving into algorithms, it is necessary to apply adversarial validation to avoid overfitting issues. Overfitting is when the model does well on training data but fails drastically on test data. Even though we have tried our best not to map the exact findings of training data to test data but to generalize the patterns, in many cases, the model still performed worse on the test data. This may because the train data and test data are significantly different from each other, for example, they might have not been derived from the same population.
+The solution to this is adversarial validation. The normal way of doing so is to start with building a classifier to distinguish between training and test data; then, we should sort the predicted probabilities of training data in decreasing order; after that, we should take the starting few rows as the validation set.
+For this project, as the train and test set are not divided yet, I will start with divide the train and test set randomly by subgroup. Then, I will test is the train and test set are significantly different from each other using simple logistic regression. As the previous dividing work is randomized, the train and test sets shouldn’t be significantly different. If the AUC is between 0.5 and 0.7, I think it is fair to say that it falls in a reasonable range and the train and test sets are similar enough.
+
+```{r}
+set.seed(35)
+split = createDataPartition(data$age_group, p = 0.8, list = F)
+train = data[split,]
+test = data[-split,]
+data$is_test = 0
+data[-split,"is_test"] = 1
+data$is_test = as.factor(data$is_test)
+
+model = glm(formula = is_test~., data = data[,-123], family = "binomial")
+
+pred = predict(model, data, type = "response")
+ROCRpred = prediction(pred, data$is_test)
+as.numeric(performance(ROCRpred, "auc")@y.values)
+rm(model, i, split, ROCRpred, pred)
+```
+
+The result shows that the AUC is within the range of 0.5-0.7. It does fall  within a reasonable range, and the  train and test sets are similar enough.
+
+## Dividing Data by Subgroups
+
+The data is cleaned previously based on the following rules:
+i) All missing values are removed. (rule: variables who have more than 5% missing values were dropped; then, rows that contain missing values were dropped.)
+ii) All factors were converted to dummy variables.
+iii) All data were scaled
+
+For this part, the data will be divided into subsets by subgroups based on the following rules:
+\begin{center}
+\begin{tabular}{l|r}
+\hline
+Age Group & \# Obs.\\
+\hline
+[0-50) & 18012\\
+\hline
+[50-60) & 15918\\
+\hline
+[60-70) & 20052\\
+\hline
+[70-80) & 19463\\
+\hline
+[80-100) & 14040\\
+\hline
+NA & 4228\\
+\hline
+\end{tabular}
+\end{center}
+
+
+```{r}
+
+train1 = train[train$age_group == "0-50",]
+train2 = train[train$age_group == "50-60",]
+train3 = train[train$age_group == "60-70",]
+train4 = train[train$age_group == "70-80",]
+train5 = train[train$age_group == "80-100",]
+test1 = test[test$age_group == "0-50",]
+test2 = test[test$age_group == "50-60",]
+test3 = test[test$age_group == "60-70",]
+test4 = test[test$age_group == "70-80",]
+test5 = test[test$age_group == "80-100",]
+
+train$age_group = NULL
+test$age_group = NULL
+train1$age_group = NULL
+train2$age_group = NULL
+train3$age_group = NULL
+train4$age_group = NULL
+train5$age_group = NULL
+test1$age_group = NULL
+test2$age_group = NULL
+test3$age_group = NULL
+test4$age_group = NULL
+test5$age_group = NULL
+```
+
+## Models {.tabset}
+
+### Category 1:  KNN {.tabset}
+
+In pattern recognition, the k-nearest neighbors algorithm (KNN) is a non-parametric method proposed by Thomas Cover used for classification and regression. In both cases, the input consists of the k closest training examples in the feature space. In this case, we will use KNN for classification.
+
+For KNN analysis, I will start with finding the best k for each model. The result shows that k = 7 is the best for the “one model” while k = 8 is a little better for the “many model”. The following code shows the precess stated below.
+
+#### One Model
+
+```{r}
+# find best k
+for (i in 1:8){
+  onemodel_knn = knn(train[, -4], test[, -4], cl = train[, 4], k = i)
+  ct = table(test$hospital_death, onemodel_knn)
+  onemodel_knn_accuracy = sum(ct[1,1],ct[2,2])/nrow(test)
+  onemodel_knn_sensitivity = ct[2,2]/sum(ct[2,1],ct[2,2])
+  onemodel_knn_specificity = ct[1,1]/sum(ct[1,1],ct[1,2])
+  onemodel_knn_result = cbind(onemodel_knn_accuracy, onemodel_knn_sensitivity, onemodel_knn_specificity)
+  print(i)
+  print(onemodel_knn_result)
+}
+```
+
+
+```{r cat1_one_model}
+# run the best model
+onemodel_knn = knn(train[, -4], test[, -4], cl = train[, 4], k = 7) #use the best parameter from previous analysis
+ct = table(test$hospital_death, onemodel_knn)
+onemodel_knn_accuracy = sum(ct[1,1],ct[2,2])/nrow(test)
+onemodel_knn_sensitivity = ct[2,2]/sum(ct[2,1],ct[2,2])
+onemodel_knn_specificity = ct[1,1]/sum(ct[1,1],ct[1,2])
+onemodel_knn_result = cbind(onemodel_knn_accuracy, onemodel_knn_sensitivity, onemodel_knn_specificity)
+onemodel_knn_result
+```
+
+#### Many Models
+
+```{r}
+# find best k
+for (i in 1:8){
+  manymodel_knn_1 = knn(train1[, -4], test1[, -4], cl = train1[, 4], k = i)
+  manymodel_knn_2 = knn(train2[, -4], test2[, -4], cl = train2[, 4], k = i)
+  manymodel_knn_3 = knn(train3[, -4], test3[, -4], cl = train3[, 4], k = i)
+  manymodel_knn_4 = knn(train4[, -4], test4[, -4], cl = train4[, 4], k = i)
+  manymodel_knn_5 = knn(train5[, -4], test5[, -4], cl = train5[, 4], k = i)
+  
+  ct1 = table(test1$hospital_death, manymodel_knn_1)
+  ct2 = table(test2$hospital_death, manymodel_knn_2)
+  ct3 = table(test3$hospital_death, manymodel_knn_3)
+  ct4 = table(test4$hospital_death, manymodel_knn_4)
+  ct5 = table(test5$hospital_death, manymodel_knn_5)
+  
+  manymodel_knn_accuracy = sum(ct1[1,1],ct1[2,2],ct2[1,1],ct2[2,2],ct3[1,1],ct3[2,2],
+                               ct4[1,1],ct4[2,2],ct5[1,1],ct5[2,2])/nrow(test)
+  manymodel_knn_sensitivity = sum(ct1[2,2],ct2[2,2],ct3[2,2],ct4[2,2],ct5[2,2])/
+    sum(ct1[2,1],ct1[2,2],ct2[2,1],ct2[2,2],ct3[2,1],ct3[2,2],ct4[2,1],ct4[2,2],ct5[2,1],ct5[2,2])
+  manymodel_knn_specificity = sum(ct1[1,1],ct2[1,1],ct3[1,1],ct4[1,1],ct5[1,1])/
+    sum(ct1[1,1],ct1[1,2],ct2[1,1],ct2[1,2],ct3[1,1],ct3[1,2],ct4[1,1],ct4[1,2],ct5[1,1],ct5[1,2])
+  
+  manymodel_knn_result = cbind(manymodel_knn_accuracy, manymodel_knn_sensitivity, manymodel_knn_specificity)
+  print(i)
+  print(manymodel_knn_result)
+}
+```
+
+
+```{r cat1_many_models}
+# run the best model
+
+manymodel_knn_1 = knn(train1[, -4], test1[, -4], cl = train1[, 4], k = 8)
+manymodel_knn_2 = knn(train2[, -4], test2[, -4], cl = train2[, 4], k = 8)
+manymodel_knn_3 = knn(train3[, -4], test3[, -4], cl = train3[, 4], k = 8)
+manymodel_knn_4 = knn(train4[, -4], test4[, -4], cl = train4[, 4], k = 8)
+manymodel_knn_5 = knn(train5[, -4], test5[, -4], cl = train5[, 4], k = 8)
+
+ct1 = table(test1$hospital_death, manymodel_knn_1)
+ct2 = table(test2$hospital_death, manymodel_knn_2)
+ct3 = table(test3$hospital_death, manymodel_knn_3)
+ct4 = table(test4$hospital_death, manymodel_knn_4)
+ct5 = table(test5$hospital_death, manymodel_knn_5)
+
+manymodel_knn_accuracy = sum(ct1[1,1],ct1[2,2],ct2[1,1],ct2[2,2],ct3[1,1],ct3[2,2],
+                             ct4[1,1],ct4[2,2],ct5[1,1],ct5[2,2])/nrow(test)
+manymodel_knn_sensitivity = sum(ct1[2,2],ct2[2,2],ct3[2,2],ct4[2,2],ct5[2,2])/
+  sum(ct1[2,1],ct1[2,2],ct2[2,1],ct2[2,2],ct3[2,1],ct3[2,2],ct4[2,1],ct4[2,2],ct5[2,1],ct5[2,2])
+manymodel_knn_specificity = sum(ct1[1,1],ct2[1,1],ct3[1,1],ct4[1,1],ct5[1,1])/
+  sum(ct1[1,1],ct1[1,2],ct2[1,1],ct2[1,2],ct3[1,1],ct3[1,2],ct4[1,1],ct4[1,2],ct5[1,1],ct5[1,2])
+
+manymodel_knn_result = cbind(manymodel_knn_accuracy, manymodel_knn_sensitivity, manymodel_knn_specificity)
+manymodel_knn_result
+```
+
+
+### Category 2:  logistic regression {.tabset}
+
+Logistic regression is a statistical model that in its basic form uses a logistic function to model a binary dependent variable, although many more complex extensions exist. In regression analysis, logistic regression (or logit regression) is estimating the parameters of a logistic model (a form of binary regression).
+
+For logistical aggression analysis, I start with arbitrarily assign a threshold = 0.5 to each model. Then, I optimized the parameters using the loop. When trying threshold = 0.1~0.9 for the “one model”, it seems that threshold = 0.4 works the best. When trying threshold = 0.1~0.5 for the “many model”, each model gets its best thresholds. After the analysis, both the “one model” and the “many model” get to use the best parameter to run again and finalize the results.
+
+#### One Model
+
+```{r cat2_one_model}
+onemodel_logistic = glm(hospital_death ~ ., data = train)
+pred = predict(onemodel_logistic, newdata = test, type = "response")
+ct = table(test$hospital_death, pred = as.numeric(pred>0.5))
+onemodel_logistic_accuracy = sum(ct[1,1],ct[2,2])/nrow(test)
+onemodel_logistic_sensitivity = ct[2,2]/sum(ct[2,1],ct[2,2])
+onemodel_logistic_specificity = ct[1,1]/sum(ct[1,1],ct[1,2])
+
+onemodel_logistic_result = cbind(onemodel_logistic_accuracy, onemodel_logistic_sensitivity, onemodel_logistic_specificity)
+onemodel_logistic_result
+```
+
+```{r}
+for (i in c(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9)){
+  ct = table(test$hospital_death, pred = as.numeric(pred>i))
+  onemodel_logistic_accuracy = sum(ct[1,1],ct[2,2])/nrow(test)
+  onemodel_logistic_sensitivity = ct[2,2]/sum(ct[2,1],ct[2,2])
+  onemodel_logistic_specificity = ct[1,1]/sum(ct[1,1],ct[1,2])
+  onemodel_logistic_result = cbind(onemodel_logistic_accuracy, onemodel_logistic_sensitivity, onemodel_logistic_specificity)
+  print(i)
+  print(onemodel_logistic_result)
+}
+
+```
+```{r}
+# run the best model
+onemodel_logistic = glm(hospital_death ~ ., data = train)
+pred = predict(onemodel_logistic, newdata = test, type = "response")
+ct = table(test$hospital_death, pred = as.numeric(pred>0.4))
+onemodel_logistic_accuracy = sum(ct[1,1],ct[2,2])/nrow(test)
+onemodel_logistic_sensitivity = ct[2,2]/sum(ct[2,1],ct[2,2])
+onemodel_logistic_specificity = ct[1,1]/sum(ct[1,1],ct[1,2])
+
+onemodel_logistic_result = cbind(onemodel_logistic_accuracy, onemodel_logistic_sensitivity, onemodel_logistic_specificity)
+onemodel_logistic_result
+```
+
+
+#### Many Models
+
+```{r cat2_many_models}
+manymodel_logistic_1 = glm(hospital_death ~ ., data = train1)
+manymodel_logistic_2 = glm(hospital_death ~ ., data = train2)
+manymodel_logistic_3 = glm(hospital_death ~ ., data = train3)
+manymodel_logistic_4 = glm(hospital_death ~ ., data = train4)
+manymodel_logistic_5 = glm(hospital_death ~ ., data = train5)
+
+pred1 = predict(manymodel_logistic_1, newdata = test1, type = "response")
+pred2 = predict(manymodel_logistic_2, newdata = test2, type = "response")
+pred3 = predict(manymodel_logistic_3, newdata = test3, type = "response")
+pred4 = predict(manymodel_logistic_4, newdata = test4, type = "response")
+pred5 = predict(manymodel_logistic_5, newdata = test5, type = "response")
+
+ct1 = table(test1$hospital_death, as.numeric(pred1>0.5))
+ct2 = table(test2$hospital_death, as.numeric(pred2>0.5))
+ct3 = table(test3$hospital_death, as.numeric(pred3>0.5))
+ct4 = table(test4$hospital_death, as.numeric(pred4>0.5))
+ct5 = table(test5$hospital_death, as.numeric(pred5>0.5))
+
+manymodel_logistic_accuracy = sum(ct1[1,1],ct1[2,2],ct2[1,1],ct2[2,2],ct3[1,1],ct3[2,2],
+                             ct4[1,1],ct4[2,2],ct5[1,1],ct5[2,2])/nrow(test)
+manymodel_logistic_sensitivity = sum(ct1[2,2],ct2[2,2],ct3[2,2],ct4[2,2],ct5[2,2])/
+  sum(ct1[2,1],ct1[2,2],ct2[2,1],ct2[2,2],ct3[2,1],ct3[2,2],ct4[2,1],ct4[2,2],ct5[2,1],ct5[2,2])
+manymodel_logistic_specificity = sum(ct1[1,1],ct2[1,1],ct3[1,1],ct4[1,1],ct5[1,1])/
+  sum(ct1[1,1],ct1[1,2],ct2[1,1],ct2[1,2],ct3[1,1],ct3[1,2],ct4[1,1],ct4[1,2],ct5[1,1],ct5[1,2])
+
+manymodel_logistic_result = cbind(manymodel_logistic_accuracy, manymodel_logistic_sensitivity, manymodel_logistic_specificity)
+manymodel_logistic_result
+```
+
+```{r}
+for (i in c(0.1,0.2,0.3,0.4,0.5)){ # i = 0.6 is out of range
+  ct1 = table(test1$hospital_death, as.numeric(pred1>i))
+  ct1_accuracy = sum(ct1[1,1],ct1[2,2])/sum(ct1[1,1],ct1[2,2],ct1[1,2],ct1[2,1])
+  
+  ct2 = table(test2$hospital_death, as.numeric(pred2>i))
+  ct2_accuracy = sum(ct2[1,1],ct2[2,2])/sum(ct2[1,1],ct2[2,2],ct2[1,2],ct2[2,1])
+  
+  ct3 = table(test3$hospital_death, as.numeric(pred3>i))
+  ct3_accuracy = sum(ct3[1,1],ct3[2,2])/sum(ct3[1,1],ct3[2,2],ct3[1,2],ct3[2,1])
+  
+  ct4 = table(test4$hospital_death, as.numeric(pred4>i))
+  ct4_accuracy = sum(ct4[1,1],ct4[2,2])/sum(ct4[1,1],ct4[2,2],ct4[1,2],ct4[2,1])
+  
+  ct5 = table(test5$hospital_death, as.numeric(pred5>i))
+  ct5_accuracy = sum(ct5[1,1],ct5[2,2])/sum(ct5[1,1],ct5[2,2],ct5[1,2],ct5[2,1])
+  
+  print(i)
+  print(paste(ct1_accuracy,ct2_accuracy,ct3_accuracy,ct4_accuracy,ct5_accuracy))
+}
+```
+```{r}
+# run the best model
+manymodel_logistic_1 = glm(hospital_death ~ ., data = train1)
+manymodel_logistic_2 = glm(hospital_death ~ ., data = train2)
+manymodel_logistic_3 = glm(hospital_death ~ ., data = train3)
+manymodel_logistic_4 = glm(hospital_death ~ ., data = train4)
+manymodel_logistic_5 = glm(hospital_death ~ ., data = train5)
+
+pred1 = predict(manymodel_logistic_1, newdata = test1, type = "response")
+pred2 = predict(manymodel_logistic_2, newdata = test2, type = "response")
+pred3 = predict(manymodel_logistic_3, newdata = test3, type = "response")
+pred4 = predict(manymodel_logistic_4, newdata = test4, type = "response")
+pred5 = predict(manymodel_logistic_5, newdata = test5, type = "response")
+
+ct1 = table(test1$hospital_death, as.numeric(pred1>0.3))
+ct2 = table(test2$hospital_death, as.numeric(pred2>0.4))
+ct3 = table(test3$hospital_death, as.numeric(pred3>0.4))
+ct4 = table(test4$hospital_death, as.numeric(pred4>0.5))
+ct5 = table(test5$hospital_death, as.numeric(pred5>0.4))
+
+manymodel_logistic_accuracy = sum(ct1[1,1],ct1[2,2],ct2[1,1],ct2[2,2],ct3[1,1],ct3[2,2],
+                             ct4[1,1],ct4[2,2],ct5[1,1],ct5[2,2])/nrow(test)
+manymodel_logistic_sensitivity = sum(ct1[2,2],ct2[2,2],ct3[2,2],ct4[2,2],ct5[2,2])/
+  sum(ct1[2,1],ct1[2,2],ct2[2,1],ct2[2,2],ct3[2,1],ct3[2,2],ct4[2,1],ct4[2,2],ct5[2,1],ct5[2,2])
+manymodel_logistic_specificity = sum(ct1[1,1],ct2[1,1],ct3[1,1],ct4[1,1],ct5[1,1])/
+  sum(ct1[1,1],ct1[1,2],ct2[1,1],ct2[1,2],ct3[1,1],ct3[1,2],ct4[1,1],ct4[1,2],ct5[1,1],ct5[1,2])
+
+manymodel_logistic_result = cbind(manymodel_logistic_accuracy, manymodel_logistic_sensitivity, manymodel_logistic_specificity)
+manymodel_logistic_result
+```
+
+
+### Category 3:  decision tree {.tabset}
+
+The decision tree builds classification or regression models in the form of a tree structure. It breaks down a dataset into smaller and smaller subsets while at the same time an associated decision tree is incrementally developed. The final result is a tree with decision nodes and leaf nodes. A decision node has two or more branches; leaf node represents a classification or decision. The topmost decision node in a tree which corresponds to the best predictor called the root node. Decision trees are often used in both categorical and numerical data. 
+
+For decision tree analysis, I simply use the basic tree without tuning. As the “one model” is using a much larger dataset than each sub-model in the “many model”, it is very hard to set a fair tuning standard for both. Meanwhile, there is no evidence supporting that the model and the data are highly likely to overfit. Therefore, using untuned trees seems to be the best choice.
+
+#### One Model
+
+```{r cat3_one_model}
+set.seed(35)
+onemodel_tree = rpart(hospital_death ~ ., train, method = "class")
+#rpart.plot(onemodel_tree)
+pred = predict(onemodel_tree, newdata = test, type = "class")
+ct = table(test$hospital_death, pred)
+onemodel_tree_accuracy = sum(ct[1,1],ct[2,2])/nrow(test)
+onemodel_tree_sensitivity = ct[2,2]/sum(ct[2,1],ct[2,2])
+onemodel_tree_specificity = ct[1,1]/sum(ct[1,1],ct[1,2])
+
+onemodel_tree_result = cbind(onemodel_tree_accuracy, onemodel_tree_sensitivity, onemodel_tree_specificity)
+onemodel_tree_result
+```
+
+#### Many Models
+
+```{r cat3_many_models}
+set.seed(35)
+manymodel_tree_1 = rpart(hospital_death ~ ., train1, method = "class")
+set.seed(35)
+manymodel_tree_2 = rpart(hospital_death ~ ., train2, method = "class")
+set.seed(35)
+manymodel_tree_3 = rpart(hospital_death ~ ., train3, method = "class")
+set.seed(35)
+manymodel_tree_4 = rpart(hospital_death ~ ., train4, method = "class")
+set.seed(35)
+manymodel_tree_5 = rpart(hospital_death ~ ., train5, method = "class")
+
+pred1 = predict(manymodel_tree_1, newdata = test1, type = "class")
+pred2 = predict(manymodel_tree_2, newdata = test2, type = "class")
+pred3 = predict(manymodel_tree_3, newdata = test3, type = "class")
+pred4 = predict(manymodel_tree_4, newdata = test4, type = "class")
+pred5 = predict(manymodel_tree_5, newdata = test5, type = "class")
+
+ct1 = table(test1$hospital_death, pred1)
+ct2 = table(test2$hospital_death, pred2)
+ct3 = table(test3$hospital_death, pred3)
+ct4 = table(test4$hospital_death, pred4)
+ct5 = table(test5$hospital_death, pred5)
+
+manymodel_tree_accuracy = sum(ct1[1,1],ct1[2,2],ct2[1,1],ct2[2,2],ct3[1,1],ct3[2,2],
+                             ct4[1,1],ct4[2,2],ct5[1,1],ct5[2,2])/nrow(test)
+manymodel_tree_sensitivity = sum(ct1[2,2],ct2[2,2],ct3[2,2],ct4[2,2],ct5[2,2])/
+  sum(ct1[2,1],ct1[2,2],ct2[2,1],ct2[2,2],ct3[2,1],ct3[2,2],ct4[2,1],ct4[2,2],ct5[2,1],ct5[2,2])
+manymodel_tree_specificity = sum(ct1[1,1],ct2[1,1],ct3[1,1],ct4[1,1],ct5[1,1])/
+  sum(ct1[1,1],ct1[1,2],ct2[1,1],ct2[1,2],ct3[1,1],ct3[1,2],ct4[1,1],ct4[1,2],ct5[1,1],ct5[1,2])
+
+manymodel_tree_result = cbind(manymodel_tree_accuracy, manymodel_tree_sensitivity, manymodel_tree_specificity)
+manymodel_tree_result
+```
+
+
+### Category 4:  xgboost {.tabset}
+
+XGBoost is an optimized distributed gradient boosting library designed to be highly efficient, flexible and portable. It implements machine learning algorithms under the Gradient Boosting framework. XGBoost provides a parallel tree boosting (also known as GBDT, GBM) that solve many data science problems in a fast and accurate way. The same code runs on major distributed environment (Hadoop, SGE, MPI) and can solve problems beyond billions of examples.
+
+For xgboost analysis, I simply set the parameters to “nrounds = 10, objective = "binary:logistic", max_depth = 2, eta = 1, eval_metric ="auc"” for both “one model” and “many model”. The result of the models is shown below.
+
+#### One Model
+
+```{r cat5_one_model}
+onemodel_xgboost = xgboost(data = model.matrix(hospital_death ~ ., train)[,-4], label = train$hospital_death, nrounds = 10, objective = "binary:logistic", max_depth = 2, eta = 1, eval_metric ="auc")
+pred = predict(onemodel_xgboost, model.matrix(hospital_death ~ ., test)[,-4])
+ct = table(test$hospital_death, as.numeric(pred>0.5))
+onemodel_xgboost_accuracy = sum(ct[1,1],ct[2,2])/nrow(test)
+onemodel_xgboost_sensitivity = ct[2,2]/sum(ct[2,1],ct[2,2])
+onemodel_xgboost_specificity = ct[1,1]/sum(ct[1,1],ct[1,2])
+
+onemodel_xgboost_result = cbind(onemodel_xgboost_accuracy, onemodel_xgboost_sensitivity, onemodel_xgboost_specificity)
+onemodel_xgboost_result
+```
+
+#### Many Models
+
+```{r cat5_many_models}
+manymodel_xgboost_1 = xgboost(data = model.matrix(hospital_death ~ ., train1)[,-4], label = train1$hospital_death, nrounds = 10, objective = "binary:logistic", max_depth = 2, eta = 1, eval_metric ="auc")
+manymodel_xgboost_2 = xgboost(data = model.matrix(hospital_death ~ ., train2)[,-4], label = train2$hospital_death, nrounds = 10, objective = "binary:logistic", max_depth = 2, eta = 1, eval_metric ="auc")
+manymodel_xgboost_3 = xgboost(data = model.matrix(hospital_death ~ ., train3)[,-4], label = train3$hospital_death, nrounds = 10, objective = "binary:logistic", max_depth = 2, eta = 1, eval_metric ="auc")
+manymodel_xgboost_4 = xgboost(data = model.matrix(hospital_death ~ ., train4)[,-4], label = train4$hospital_death, nrounds = 10, objective = "binary:logistic", max_depth = 2, eta = 1, eval_metric ="auc")
+manymodel_xgboost_5 = xgboost(data = model.matrix(hospital_death ~ ., train5)[,-4], label = train5$hospital_death, nrounds = 10, objective = "binary:logistic", max_depth = 2, eta = 1, eval_metric ="auc")
+
+pred1 = predict(manymodel_xgboost_1, model.matrix(hospital_death ~ ., test1)[,-4])
+pred2 = predict(manymodel_xgboost_2, model.matrix(hospital_death ~ ., test2)[,-4])
+pred3 = predict(manymodel_xgboost_3, model.matrix(hospital_death ~ ., test3)[,-4])
+pred4 = predict(manymodel_xgboost_4, model.matrix(hospital_death ~ ., test4)[,-4])
+pred5 = predict(manymodel_xgboost_5, model.matrix(hospital_death ~ ., test5)[,-4])
+
+ct1 = table(test1$hospital_death, as.numeric(pred1>0.5))
+ct2 = table(test2$hospital_death, as.numeric(pred2>0.5))
+ct3 = table(test3$hospital_death, as.numeric(pred3>0.5))
+ct4 = table(test4$hospital_death, as.numeric(pred4>0.5))
+ct5 = table(test5$hospital_death, as.numeric(pred5>0.5))
+
+manymodel_xgboost_accuracy = sum(ct1[1,1],ct1[2,2],ct2[1,1],ct2[2,2],ct3[1,1],ct3[2,2],
+                             ct4[1,1],ct4[2,2],ct5[1,1],ct5[2,2])/nrow(test)
+manymodel_xgboost_sensitivity = sum(ct1[2,2],ct2[2,2],ct3[2,2],ct4[2,2],ct5[2,2])/
+  sum(ct1[2,1],ct1[2,2],ct2[2,1],ct2[2,2],ct3[2,1],ct3[2,2],ct4[2,1],ct4[2,2],ct5[2,1],ct5[2,2])
+manymodel_xgboost_specificity = sum(ct1[1,1],ct2[1,1],ct3[1,1],ct4[1,1],ct5[1,1])/
+  sum(ct1[1,1],ct1[1,2],ct2[1,1],ct2[1,2],ct3[1,1],ct3[1,2],ct4[1,1],ct4[1,2],ct5[1,1],ct5[1,2])
+
+manymodel_xgboost_result = cbind(manymodel_xgboost_accuracy, manymodel_xgboost_sensitivity, manymodel_xgboost_specificity)
+manymodel_xgboost_result
+```
+
+### Category 5:  Random Forest {.tabset}
+
+Random forests or random decision forests are an ensemble learning method for classification, regression, and other tasks that operate by constructing a multitude of decision trees at training time and outputting the class that is the mode of the classes (classification) or mean prediction (regression) of the individual trees. Random decision forests correct for decision trees' habit of overfitting to their training set.
+
+For random forest analysis, I simply use the default parameters, except for setting ntree = 20 for saving computational power. As the “one model” is using a much larger dataset than each sub-model in the “many model”, it is hard to choose a parameter that is fair for both. The result of the models are shown as below.
+
+```{r}
+data = store1
+set.seed(35)
+split = createDataPartition(data$age_group, p = 0.8, list = F)
+train = data[split,]
+test = data[-split,]
+
+train1 = train[train$age_group == "0-50",]
+train2 = train[train$age_group == "50-60",]
+train3 = train[train$age_group == "60-70",]
+train4 = train[train$age_group == "70-80",]
+train5 = train[train$age_group == "80-100",]
+test1 = test[test$age_group == "0-50",]
+test2 = test[test$age_group == "50-60",]
+test3 = test[test$age_group == "60-70",]
+test4 = test[test$age_group == "70-80",]
+test5 = test[test$age_group == "80-100",]
+```
+
+
+
+#### One Model
+
+```{r cat4_one_model}
+set.seed(35)
+onemodel_forest = randomForest(hospital_death ~ ., train[,-73], ntree = 20)
+pred = predict(onemodel_forest, newdata = test)
+ct = table(test$hospital_death, as.numeric(pred>0.5))
+onemodel_forest_accuracy = sum(ct[1,1],ct[2,2])/nrow(test)
+onemodel_forest_sensitivity = ct[2,2]/sum(ct[2,1],ct[2,2])
+onemodel_forest_specificity = ct[1,1]/sum(ct[1,1],ct[1,2])
+
+onemodel_forest_result = cbind(onemodel_forest_accuracy, onemodel_forest_sensitivity, onemodel_forest_specificity)
+onemodel_forest_result
+```
+
+#### Many Models
+
+```{r cat4_many_models}
+set.seed(35)
+manymodel_forest_1 = randomForest(hospital_death ~ ., train1[,-73], ntree = 20)
+set.seed(35)
+manymodel_forest_2 = randomForest(hospital_death ~ ., train2[,-73], ntree = 20)
+set.seed(35)
+manymodel_forest_3 = randomForest(hospital_death ~ ., train3[,-73], ntree = 20)
+set.seed(35)
+manymodel_forest_4 = randomForest(hospital_death ~ ., train4[,-73], ntree = 20)
+set.seed(35)
+manymodel_forest_5 = randomForest(hospital_death ~ ., train5[,-73], ntree = 20)
+
+pred1 = predict(manymodel_forest_1, newdata = test1)
+pred2 = predict(manymodel_forest_2, newdata = test2)
+pred3 = predict(manymodel_forest_3, newdata = test3)
+pred4 = predict(manymodel_forest_4, newdata = test4)
+pred5 = predict(manymodel_forest_5, newdata = test5)
+
+ct1 = table(test1$hospital_death, as.numeric(pred1>0.5))
+ct2 = table(test2$hospital_death, as.numeric(pred2>0.5))
+ct3 = table(test3$hospital_death, as.numeric(pred3>0.5))
+ct4 = table(test4$hospital_death, as.numeric(pred4>0.5))
+ct5 = table(test5$hospital_death, as.numeric(pred5>0.5))
+
+manymodel_forest_accuracy = sum(ct1[1,1],ct1[2,2],ct2[1,1],ct2[2,2],ct3[1,1],ct3[2,2],
+                             ct4[1,1],ct4[2,2],ct5[1,1],ct5[2,2])/nrow(test)
+manymodel_forest_sensitivity = sum(ct1[2,2],ct2[2,2],ct3[2,2],ct4[2,2],ct5[2,2])/
+  sum(ct1[2,1],ct1[2,2],ct2[2,1],ct2[2,2],ct3[2,1],ct3[2,2],ct4[2,1],ct4[2,2],ct5[2,1],ct5[2,2])
+manymodel_forest_specificity = sum(ct1[1,1],ct2[1,1],ct3[1,1],ct4[1,1],ct5[1,1])/
+  sum(ct1[1,1],ct1[1,2],ct2[1,1],ct2[1,2],ct3[1,1],ct3[1,2],ct4[1,1],ct4[1,2],ct5[1,1],ct5[1,2])
+
+manymodel_forest_result = cbind(manymodel_forest_accuracy, manymodel_forest_sensitivity, manymodel_forest_specificity)
+manymodel_forest_result
+```
+
+
+
+## Scoreboard
+
+```{r scoreboard}
+result = data.frame(rbind(onemodel_knn_result, manymodel_knn_result, onemodel_logistic_result, manymodel_logistic_result, onemodel_tree_result, manymodel_tree_result, onemodel_forest_result, manymodel_forest_result, onemodel_xgboost_result, manymodel_xgboost_result))
+colnames(result) = c("accuracy", "sensitivity", "specificity")
+rownames(result) = c("onemodel_knn_result", "manymodel_knn_result", "onemodel_logistic_result", "manymodel_logistic_result", "onemodel_tree_result", "manymodel_tree_result", "onemodel_forest_result", "manymodel_forest_result", "onemodel_xgboost_result", "manymodel_xgboost_result")
+result
+```
+
+
+## Discussion
+
+The scoreboard above shows the accuracy, sensitivity, and specificity of KNN, logistic regression, decision tree, XGBoost, and random forest models. Though accuracy > 90% seems rather impressive, further analysis shows that even if you guess 0 for all hospital_death, you will get an accuracy of 92.05%. Luckily, most models except for the KNN model have an accuracy of over 92.05%.
+
+Comparing “one model” with “many model”, the accuracy is mostly the same. KNN, Logistic regression and random forest get slightly higher accuracy in “one model”, while decision tree and XGBoost get slightly higher accuracy in “many model”. I think this implies the age subgroups of this dataset are similarly distributed as the entire dataset, in other words, the division of sub-dataset didn’t make much difference.
+
+
+## References
+
+http://manishbarnwal.com/blog/2017/02/15/introduction_to_adversarial_validation/
+
+https://www.kdnuggets.com/2016/10/adversarial-validation-explained.html
+
+https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm#:~:text=In%20pattern%20recognition%2C%20the%20k,examples%20in%20the%20feature%20space.
+
+https://en.wikipedia.org/wiki/Logistic_regression#:~:text=Logistic%20regression%20is%20a%20statistical,a%20form%20of%20binary%20regression).
+
+https://www.saedsayad.com/decision_tree.htm#:~:text=Decision%20Tree%20%2D%20Classification,decision%20nodes%20and%20leaf%20nodes
+
